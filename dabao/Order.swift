@@ -2,7 +2,7 @@ import Foundation
 
 nonisolated enum Section { case drinks, food }
 
-nonisolated struct Order: Hashable {
+nonisolated struct Order: Hashable, Identifiable {
     var id = UUID()
     var dish: String
     var quantity: Int

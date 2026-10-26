@@ -37,4 +37,4 @@ Select an iPhone simulator and press **Run** (⌘R).
 
 - **Delegate pattern:** the Add Order screen doesn't know which screen opened it. It calls `delegate?.didAdd(_:)`, and `OrdersViewController` sets itself as the delegate before presenting the form.
 - **Diffable data source:** after every change, `applySnapshot()` rebuilds the snapshot from the `orders` array and splits it into sections by `isDrink`. Rows are looked up with `dataSource.itemIdentifier(for:)` rather than by row number, so sections don't break deletes.
-- **Identity:** `Order` uses the synthesized `Hashable`, which includes every stored property. Changing an order's quantity therefore makes diffable treat it as a new item, so the row is deleted and reinserted (with a fade).
+- **Identity:** the snapshot holds `Order.ID` values, not whole orders, and the cell provider looks up the latest `Order` from `orders`. Changing a quantity keeps the same ID, so `changeQuantity` calls `reconfigureItems` to refresh that row in place instead of deleting and reinserting it.

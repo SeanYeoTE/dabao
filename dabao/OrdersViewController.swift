@@ -1,6 +1,6 @@
 import UIKit
 
-final class OrdersDataSource: UITableViewDiffableDataSource<Section, Order> {
+final class OrdersDataSource: UITableViewDiffableDataSource<Section, Order.ID> {
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch sectionIdentifier(for: section) {
         case .drinks: "Drinks"
@@ -53,13 +53,15 @@ final class OrdersViewController: UIViewController , AddOrderDelegate {
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
         tableView.delegate = self
         
-        dataSource = OrdersDataSource(tableView: tableView) { [weak self] tableView, indexPath, order in
+        dataSource = OrdersDataSource(tableView: tableView) { [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
+            // The snapshot only holds IDs, so always read the latest order from `orders`.
+            guard let self, let order = self.orders.first(where: { $0.id == id }) else { return cell }
             var content = cell.defaultContentConfiguration()
             content.text = order.dish
             content.secondaryText = "x\(order.quantity)"
             cell.contentConfiguration = content
-            cell.accessoryView = self?.makeQuantityStepper(for: order)
+            self.configureQuantityStepper(in: cell, for: order)
             return cell
         }
         dataSource.defaultRowAnimation = .fade
@@ -71,10 +73,10 @@ final class OrdersViewController: UIViewController , AddOrderDelegate {
     }
     
     private func applySnapshot() {
-        var snapshot = NSDiffableDataSourceSnapshot<Section, Order>()
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Order.ID>()
         snapshot.appendSections([.drinks, .food])
-        snapshot.appendItems(orders.filter { $0.isDrink }, toSection: .drinks)
-        snapshot.appendItems(orders.filter { !$0.isDrink }, toSection: .food)
+        snapshot.appendItems(orders.filter { $0.isDrink }.map(\.id), toSection: .drinks)
+        snapshot.appendItems(orders.filter { !$0.isDrink }.map(\.id), toSection: .food)
         dataSource.apply(snapshot, animatingDifferences: true)
     }
     
@@ -99,22 +101,33 @@ final class OrdersViewController: UIViewController , AddOrderDelegate {
 }
 
 extension OrdersViewController {
-    private func makeQuantityStepper(for order: Order) -> UIStepper {
-        let stepper = UIStepper()
-        stepper.minimumValue = 1
+    private static let quantityActionID = UIAction.Identifier("quantity")
+
+    // Reuses the cell's existing stepper so reconfiguring doesn't swap it out mid-tap.
+    private func configureQuantityStepper(in cell: UITableViewCell, for order: Order) {
+        let stepper: UIStepper
+        if let existing = cell.accessoryView as? UIStepper {
+            stepper = existing
+        } else {
+            stepper = UIStepper()
+            stepper.minimumValue = 1
+            cell.accessoryView = stepper
+        }
         stepper.value = Double(order.quantity)
-        stepper.addAction(UIAction { [weak self] action in
+        // Same identifier replaces the action from this cell's previous order.
+        stepper.addAction(UIAction(identifier: Self.quantityActionID) { [weak self] action in
             guard let stepper = action.sender as? UIStepper else { return }
             self?.changeQuantity(of: order.id, to: Int(stepper.value))
         }, for: .valueChanged)
-        return stepper
     }
 
-    private func changeQuantity(of id: UUID, to quantity: Int) {
+    private func changeQuantity(of id: Order.ID, to quantity: Int) {
         guard let index = orders.firstIndex(where: { $0.id == id }) else { return }
         orders[index].quantity = quantity
         save()
-        applySnapshot()
+        var snapshot = dataSource.snapshot()
+        snapshot.reconfigureItems([id])
+        dataSource.apply(snapshot, animatingDifferences: true)
     }
 }
 
@@ -122,11 +135,11 @@ extension OrdersViewController {
 extension OrdersViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let delete = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
-            guard let self, let order = self.dataSource.itemIdentifier(for: indexPath) else {
+            guard let self, let id = self.dataSource.itemIdentifier(for: indexPath) else {
                 completion(false)
                 return
             }
-            self.orders.removeAll { $0.id == order.id }
+            self.orders.removeAll { $0.id == id }
             self.save()
             self.applySnapshot()
             completion(true)
